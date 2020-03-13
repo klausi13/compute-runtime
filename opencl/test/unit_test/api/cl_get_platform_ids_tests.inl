@@ -84,6 +84,7 @@ TEST(clGetPlatformIDsNegativeTests, whenFailToCreateDeviceThenClGetPlatfomsIdsRe
 
     platformsImpl.clear();
 }
+
 TEST(clGetPlatformIDsNegativeTests, whenFailToCreatePlatformThenClGetPlatfomsIdsReturnsOutOfHostMemoryError) {
     VariableBackup<decltype(Platform::createFunc)> createFuncBackup{&Platform::createFunc};
     Platform::createFunc = [](ExecutionEnvironment &executionEnvironment) -> std::unique_ptr<Platform> {

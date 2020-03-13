@@ -37,19 +37,15 @@ class MockDevice : public RootDevice {
     using Device::commandStreamReceivers;
     using Device::createDeviceInternals;
     using Device::createEngine;
-    using Device::deviceExtensions;
     using Device::deviceInfo;
-    using Device::enabledClVersion;
     using Device::engines;
     using Device::executionEnvironment;
     using Device::initializeCaps;
-    using Device::name;
     using RootDevice::createEngines;
     using RootDevice::subdevices;
 
     void setOSTime(OSTime *osTime);
     void setDriverInfo(DriverInfo *driverInfo);
-    bool hasDriverInfo();
 
     static bool createSingleDevice;
     bool createDeviceImpl() override;
@@ -94,7 +90,7 @@ class MockDevice : public RootDevice {
     template <typename T>
     static T *createWithExecutionEnvironment(const HardwareInfo *pHwInfo, ExecutionEnvironment *executionEnvironment, uint32_t rootDeviceIndex) {
         pHwInfo = pHwInfo ? pHwInfo : platformDevices[0];
-        executionEnvironment->setHwInfo(pHwInfo);
+        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfo(pHwInfo);
         T *device = new T(executionEnvironment, rootDeviceIndex);
         executionEnvironment->memoryManager = std::move(device->mockMemoryManager);
         return createDeviceInternals(device);
@@ -106,7 +102,9 @@ class MockDevice : public RootDevice {
         auto numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() ? DebugManager.flags.CreateMultipleRootDevices.get() : 1u;
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         pHwInfo = pHwInfo ? pHwInfo : platformDevices[0];
-        executionEnvironment->setHwInfo(pHwInfo);
+        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
+            executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(pHwInfo);
+        }
         return createWithExecutionEnvironment<T>(pHwInfo, executionEnvironment, rootDeviceIndex);
     }
 
@@ -125,15 +123,20 @@ class MockDevice : public RootDevice {
 class MockClDevice : public ClDevice {
   public:
     using ClDevice::ClDevice;
+    using ClDevice::deviceExtensions;
+    using ClDevice::deviceInfo;
+    using ClDevice::enabledClVersion;
+    using ClDevice::initializeCaps;
+    using ClDevice::name;
     using ClDevice::simultaneousInterops;
 
     explicit MockClDevice(MockDevice *pMockDevice);
 
+    void setDriverInfo(DriverInfo *driverInfo);
+    bool hasDriverInfo();
+
     bool createEngines() { return device.createEngines(); }
     void setOSTime(OSTime *osTime) { device.setOSTime(osTime); }
-    void setDriverInfo(DriverInfo *driverInfo) { device.setDriverInfo(driverInfo); }
-    bool hasDriverInfo() { return device.hasDriverInfo(); }
-    bool createDeviceImpl() { return device.createDeviceImpl(); }
     bool getCpuTime(uint64_t *timeStamp) { return device.getCpuTime(timeStamp); }
     void setPreemptionMode(PreemptionMode mode) { device.setPreemptionMode(mode); }
     void injectMemoryManager(MemoryManager *pMemoryManager) { device.injectMemoryManager(pMemoryManager); }
@@ -159,8 +162,12 @@ class MockClDevice : public ClDevice {
     std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const { return device.createCommandStreamReceiver(); }
     BuiltIns *getBuiltIns() const { return getDevice().getBuiltIns(); }
 
+    void setDebuggerActive(bool active) {
+        this->deviceInfo.debuggerActive = active;
+        device.deviceInfo.debuggerActive = active;
+    }
+
     MockDevice &device;
-    DeviceInfo &deviceInfo;
     ExecutionEnvironment *&executionEnvironment;
     static bool &createSingleDevice;
     static decltype(&createCommandStream) &createCommandStreamReceiverFunc;
@@ -175,7 +182,7 @@ inline Device *MockDevice::createWithNewExecutionEnvironment<Device>(const Hardw
     executionEnvironment->prepareRootDeviceEnvironments(1);
     MockAubCenterFixture::setMockAubCenter(*executionEnvironment->rootDeviceEnvironments[0]);
     auto hwInfo = pHwInfo ? pHwInfo : *platformDevices;
-    executionEnvironment->setHwInfo(hwInfo);
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(hwInfo);
     executionEnvironment->initializeMemoryManager();
     return Device::create<RootDevice>(executionEnvironment, 0u);
 }

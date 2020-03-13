@@ -10,6 +10,7 @@
 
 #include "opencl/source/event/user_event.h"
 #include "opencl/test/unit_test/helpers/hw_parse.h"
+#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_device.h"
@@ -58,7 +59,7 @@ struct BlitAuxTranslationTests : public ::testing::Test {
         DebugManager.flags.ForceAuxTranslationMode.set(1);
         DebugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(DispatchMode::ImmediateDispatch));
         device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
-        auto &capabilityTable = device->getExecutionEnvironment()->getMutableHardwareInfo()->capabilityTable;
+        auto &capabilityTable = device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable;
         bool createBcsEngine = !capabilityTable.blitterOperationsSupported;
         capabilityTable.blitterOperationsSupported = true;
 
@@ -137,6 +138,27 @@ struct BlitAuxTranslationTests : public ::testing::Test {
 
             ++commandItor;
         } while (!stallingWrite);
+
+        return --commandItor;
+    }
+
+    template <typename Family>
+    GenCmdList::iterator expectMiFlush(GenCmdList::iterator itorStart, GenCmdList::iterator itorEnd) {
+        Family *miFlushCmd = nullptr;
+        GenCmdList::iterator commandItor = itorStart;
+        bool miFlushWithMemoryWrite = false;
+
+        do {
+            commandItor = find<Family *>(commandItor, itorEnd);
+            if (itorEnd == commandItor) {
+                EXPECT_TRUE(false);
+                return itorEnd;
+            }
+            miFlushCmd = genCmdCast<Family *>(*commandItor);
+            miFlushWithMemoryWrite = miFlushCmd->getDestinationAddress() != 0;
+
+            ++commandItor;
+        } while (!miFlushWithMemoryWrite);
 
         return --commandItor;
     }
@@ -357,21 +379,21 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructing
 
         auto cmdFound = expectCommand<XY_COPY_BLT>(cmdListBcs.begin(), cmdListBcs.end());
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         auto miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         auxToNonAuxOutputAddress[0] = miflushDwCmd->getDestinationAddress();
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         auxToNonAuxOutputAddress[1] = miflushDwCmd->getDestinationAddress();
 
         cmdFound = expectCommand<XY_COPY_BLT>(++cmdFound, cmdListBcs.end());
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         nonAuxToAuxOutputAddress[0] = miflushDwCmd->getDestinationAddress();
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         nonAuxToAuxOutputAddress[1] = miflushDwCmd->getDestinationAddress();
     }
@@ -406,6 +428,9 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructing
     setMockKernelArgs(std::array<Buffer *, 1>{{buffer.get()}});
 
     auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.enabled = true;
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.returnValue = false;
+
     mockCmdQ->enqueueKernel(mockKernel->mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     auto kernelNode = mockCmdQ->timestampPacketContainer->peekNodes()[0];
@@ -419,6 +444,54 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructing
     // semaphore before NonAux to Aux
     auto semaphore = expectCommand<MI_SEMAPHORE_WAIT>(++cmdFound, cmdList.end());
     verifySemaphore<FamilyType>(semaphore, kernelNodeAddress);
+}
+
+HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructingCommandBufferThenSynchronizeCacheFlush) {
+    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    auto buffer = createBuffer(1, true);
+    setMockKernelArgs(std::array<Buffer *, 1>{{buffer.get()}});
+
+    auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.enabled = true;
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.returnValue = true;
+    mockCmdQ->enqueueKernel(mockKernel->mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+
+    auto cmdListBcs = getCmdList<FamilyType>(bcsCsr->getCS(0));
+    auto cmdListQueue = getCmdList<FamilyType>(mockCmdQ->getCS(0));
+
+    uint64_t cacheFlushWriteAddress = 0;
+
+    {
+        auto cmdFound = expectCommand<WALKER_TYPE>(cmdListQueue.begin(), cmdListQueue.end());
+        cmdFound = expectPipeControl<FamilyType>(++cmdFound, cmdListQueue.end());
+
+        auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*cmdFound);
+        if (!pipeControlCmd->getDcFlushEnable()) {
+            // skip pipe control with TimestampPacket write
+            cmdFound = expectPipeControl<FamilyType>(++cmdFound, cmdListQueue.end());
+            pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*cmdFound);
+        }
+
+        EXPECT_TRUE(pipeControlCmd->getDcFlushEnable());
+        EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
+        uint64_t low = pipeControlCmd->getAddress();
+        uint64_t high = pipeControlCmd->getAddressHigh();
+        cacheFlushWriteAddress = (high << 32) | low;
+        EXPECT_NE(0u, cacheFlushWriteAddress);
+    }
+
+    {
+        // Aux to nonAux
+        auto cmdFound = expectCommand<XY_COPY_BLT>(cmdListBcs.begin(), cmdListBcs.end());
+
+        // semaphore before NonAux to Aux
+        cmdFound = expectCommand<MI_SEMAPHORE_WAIT>(++cmdFound, cmdListBcs.end());
+        verifySemaphore<FamilyType>(cmdFound, cacheFlushWriteAddress);
+    }
 }
 
 HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructingCommandBufferThenSynchronizeEvents) {
@@ -487,6 +560,11 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitAuxTranslationWhenDispatchi
     using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
+    auto &hwInfo = device->getHardwareInfo();
+    auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.enabled = true;
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.returnValue = false;
+
     auto buffer0 = createBuffer(1, true);
     auto buffer1 = createBuffer(1, false);
     auto buffer2 = createBuffer(1, true);
@@ -500,7 +578,6 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitAuxTranslationWhenDispatchi
 
     setMockKernelArgs(std::array<Buffer *, 3>{{buffer0.get(), buffer1.get(), buffer2.get()}});
 
-    auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
     mockCmdQ->storeMultiDispatchInfo = true;
     mockCmdQ->enqueueKernel(mockKernel->mockKernel, 1, nullptr, gws, lws, 0, nullptr, nullptr);
 
@@ -510,11 +587,51 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitAuxTranslationWhenDispatchi
 
     EXPECT_NE(firstDispatchInfo, lastDispatchInfo); // walker split
 
-    EXPECT_EQ(dependencySize, firstDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size()));
-    EXPECT_EQ(0u, firstDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size()));
+    EXPECT_EQ(dependencySize, firstDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+    EXPECT_EQ(0u, firstDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
 
-    EXPECT_EQ(0u, lastDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size()));
-    EXPECT_EQ(dependencySize, lastDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size()));
+    EXPECT_EQ(0u, lastDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+    EXPECT_EQ(dependencySize, lastDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+}
+
+HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitAuxTranslationWithRequiredCacheFlushWhenDispatchingThenEstimateCmdBufferSize) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+
+    auto &hwInfo = device->getHardwareInfo();
+    auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.enabled = true;
+    mockCmdQ->overrideIsCacheFlushForBcsRequired.returnValue = true;
+
+    auto buffer0 = createBuffer(1, true);
+    auto buffer1 = createBuffer(1, false);
+    auto buffer2 = createBuffer(1, true);
+
+    MemObjsForAuxTranslation memObjects;
+    memObjects.insert(buffer0.get());
+    memObjects.insert(buffer2.get());
+
+    size_t numBuffersToEstimate = 2;
+    size_t dependencySize = numBuffersToEstimate * TimestampPacketHelper::getRequiredCmdStreamSizeForNodeDependencyWithBlitEnqueue<FamilyType>();
+
+    size_t cacheFlushSize = MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+
+    setMockKernelArgs(std::array<Buffer *, 3>{{buffer0.get(), buffer1.get(), buffer2.get()}});
+
+    mockCmdQ->storeMultiDispatchInfo = true;
+    mockCmdQ->enqueueKernel(mockKernel->mockKernel, 1, nullptr, gws, lws, 0, nullptr, nullptr);
+
+    MultiDispatchInfo &multiDispatchInfo = mockCmdQ->storedMultiDispatchInfo;
+    DispatchInfo *firstDispatchInfo = multiDispatchInfo.begin();
+    DispatchInfo *lastDispatchInfo = &(*multiDispatchInfo.rbegin());
+
+    EXPECT_NE(firstDispatchInfo, lastDispatchInfo); // walker split
+
+    EXPECT_EQ(dependencySize, firstDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+    EXPECT_EQ(0u, firstDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+
+    EXPECT_EQ(0u, lastDispatchInfo->dispatchInitCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
+    EXPECT_EQ(dependencySize + cacheFlushSize, lastDispatchInfo->dispatchEpilogueCommands.estimateCommandsSize(memObjects.size(), hwInfo, mockCmdQ->isCacheFlushForBcsRequired()));
 }
 
 HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructingBlockedCommandBufferThenSynchronizeBarrier) {
@@ -603,6 +720,9 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructing
 
     // semaphore before NonAux to Aux
     auto semaphore = expectCommand<MI_SEMAPHORE_WAIT>(++cmdFound, cmdList.end());
+    if (mockCmdQ->isCacheFlushForBcsRequired()) {
+        semaphore = expectCommand<MI_SEMAPHORE_WAIT>(++semaphore, cmdList.end());
+    }
     verifySemaphore<FamilyType>(semaphore, kernelNodeAddress);
 
     EXPECT_FALSE(commandQueue->isQueueBlocked());
@@ -630,21 +750,21 @@ HWTEST_TEMPLATED_F(BlitAuxTranslationTests, givenBlitTranslationWhenConstructing
 
         auto cmdFound = expectCommand<XY_COPY_BLT>(cmdListBcs.begin(), cmdListBcs.end());
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         auto miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         auxToNonAuxOutputAddress[0] = miflushDwCmd->getDestinationAddress();
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         auxToNonAuxOutputAddress[1] = miflushDwCmd->getDestinationAddress();
 
         cmdFound = expectCommand<XY_COPY_BLT>(++cmdFound, cmdListBcs.end());
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         nonAuxToAuxOutputAddress[0] = miflushDwCmd->getDestinationAddress();
 
-        cmdFound = expectCommand<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
+        cmdFound = expectMiFlush<MI_FLUSH_DW>(++cmdFound, cmdListBcs.end());
         miflushDwCmd = genCmdCast<MI_FLUSH_DW *>(*cmdFound);
         nonAuxToAuxOutputAddress[1] = miflushDwCmd->getDestinationAddress();
     }

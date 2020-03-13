@@ -85,8 +85,10 @@ cl_int CL_API_CALL clGetPlatformIDs(cl_uint numEntries,
         static std::mutex mutex;
         std::unique_lock<std::mutex> lock(mutex);
         if (platformsImpl.empty()) {
-            auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+            auto executionEnvironment = new ExecutionEnvironment();
+            executionEnvironment->incRefInternal();
             auto allDevices = DeviceFactory::createDevices(*executionEnvironment);
+            executionEnvironment->decRefInternal();
             if (allDevices.empty()) {
                 retVal = CL_OUT_OF_HOST_MEMORY;
                 break;
@@ -94,7 +96,7 @@ cl_int CL_API_CALL clGetPlatformIDs(cl_uint numEntries,
             auto groupedDevices = Platform::groupDevices(std::move(allDevices));
             for (auto &deviceVector : groupedDevices) {
 
-                auto pPlatform = Platform::createFunc(*executionEnvironment.release());
+                auto pPlatform = Platform::createFunc(*executionEnvironment);
                 if (!pPlatform || !pPlatform->initialize(std::move(deviceVector))) {
                     retVal = CL_OUT_OF_HOST_MEMORY;
                     break;
@@ -105,15 +107,18 @@ cl_int CL_API_CALL clGetPlatformIDs(cl_uint numEntries,
                 break;
             }
         }
+        cl_uint numPlatformsToExpose = std::min(numEntries, static_cast<cl_uint>(platformsImpl.size()));
+        if (numEntries == 0) {
+            numPlatformsToExpose = static_cast<cl_uint>(platformsImpl.size());
+        }
         if (platforms) {
-            // we only have one platform so we can program that directly
-            platforms[0] = platformsImpl[0].get();
+            for (auto i = 0u; i < numPlatformsToExpose; i++) {
+                platforms[i] = platformsImpl[i].get();
+            }
         }
 
-        // we only have a single platform at this time, so return 1 if num_platforms
-        // is non-nullptr
         if (numPlatforms) {
-            *numPlatforms = 1;
+            *numPlatforms = numPlatformsToExpose;
         }
     } while (false);
     TRACING_EXIT(clGetPlatformIDs, &retVal);
@@ -4168,6 +4173,13 @@ cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue commandQueue,
         return retVal;
     }
 
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMFree, &retVal);
+        return retVal;
+    }
+
     if (((svmPointers != nullptr) && (numSvmPointers == 0)) ||
         ((svmPointers == nullptr) && (numSvmPointers != 0))) {
         retVal = CL_INVALID_VALUE;
@@ -4216,6 +4228,13 @@ cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue commandQueue,
                    "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
+        TRACING_EXIT(clEnqueueSVMMemcpy, &retVal);
+        return retVal;
+    }
+
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
         TRACING_EXIT(clEnqueueSVMMemcpy, &retVal);
         return retVal;
     }
@@ -4271,6 +4290,13 @@ cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue commandQueue,
         return retVal;
     }
 
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMMemFill, &retVal);
+        return retVal;
+    }
+
     if ((svmPtr == nullptr) || (size == 0)) {
         retVal = CL_INVALID_VALUE;
         TRACING_EXIT(clEnqueueSVMMemFill, &retVal);
@@ -4320,6 +4346,13 @@ cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue commandQueue,
         return retVal;
     }
 
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMMap, &retVal);
+        return retVal;
+    }
+
     if ((svmPtr == nullptr) || (size == 0)) {
         retVal = CL_INVALID_VALUE;
         TRACING_EXIT(clEnqueueSVMMap, &retVal);
@@ -4363,6 +4396,13 @@ cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue commandQueue,
                    "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
+        TRACING_EXIT(clEnqueueSVMUnmap, &retVal);
+        return retVal;
+    }
+
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
         TRACING_EXIT(clEnqueueSVMUnmap, &retVal);
         return retVal;
     }
@@ -5022,6 +5062,13 @@ cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue commandQueue,
         return retVal;
     }
 
+    auto &device = pCommandQueue->getDevice();
+    if (!device.getHardwareInfo().capabilityTable.ftrSvm) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMMigrateMem, &retVal);
+        return retVal;
+    }
+
     if (numSvmPointers == 0 || svmPointers == nullptr) {
         retVal = CL_INVALID_VALUE;
         TRACING_EXIT(clEnqueueSVMMigrateMem, &retVal);
@@ -5036,12 +5083,9 @@ cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue commandQueue,
         TRACING_EXIT(clEnqueueSVMMigrateMem, &retVal);
         return retVal;
     }
-    auto pSvmAllocMgr = pCommandQueue->getContext().getSVMAllocsManager();
 
-    if (pSvmAllocMgr == nullptr) {
-        retVal = CL_INVALID_VALUE;
-        return retVal;
-    }
+    auto pSvmAllocMgr = pCommandQueue->getContext().getSVMAllocsManager();
+    UNRECOVERABLE_IF(pSvmAllocMgr == nullptr);
 
     for (uint32_t i = 0; i < numSvmPointers; i++) {
         auto svmData = pSvmAllocMgr->getSVMAlloc(svmPointers[i]);

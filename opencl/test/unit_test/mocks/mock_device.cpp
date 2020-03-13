@@ -26,10 +26,17 @@ decltype(&createCommandStream) MockDevice::createCommandStreamReceiverFunc = cre
 decltype(&createCommandStream) &MockClDevice::createCommandStreamReceiverFunc = MockDevice::createCommandStreamReceiverFunc;
 
 MockClDevice::MockClDevice(MockDevice *pMockDevice)
-    : ClDevice(*pMockDevice, platform()), device(*pMockDevice), deviceInfo(pMockDevice->deviceInfo),
-      executionEnvironment(pMockDevice->executionEnvironment), subdevices(pMockDevice->subdevices),
-      mockMemoryManager(pMockDevice->mockMemoryManager), engines(pMockDevice->engines) {
+    : ClDevice(*pMockDevice, platform()), device(*pMockDevice), executionEnvironment(pMockDevice->executionEnvironment),
+      subdevices(pMockDevice->subdevices), mockMemoryManager(pMockDevice->mockMemoryManager), engines(pMockDevice->engines) {
 }
+
+void MockClDevice::setDriverInfo(DriverInfo *driverInfo) {
+    this->driverInfo.reset(driverInfo);
+};
+
+bool MockClDevice::hasDriverInfo() {
+    return driverInfo.get() != nullptr;
+};
 
 MockDevice::MockDevice()
     : MockDevice(new MockExecutionEnvironment(), 0u) {
@@ -53,7 +60,7 @@ MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
     bool aubUsage = (testMode == TestMode::AubTests) || (testMode == TestMode::AubTestsWithTbx);
     this->mockMemoryManager.reset(new MemoryManagerCreate<OsAgnosticMemoryManager>(false, enableLocalMemory, aubUsage, *executionEnvironment));
     this->osTime = MockOSTime::create();
-    executionEnvironment->setHwInfo(&hwInfo);
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfo(&hwInfo);
     executionEnvironment->initializeMemoryManager();
     initializeCaps();
     preemptionMode = PreemptionHelper::getDefaultPreemptionMode(hwInfo);
@@ -68,14 +75,6 @@ bool MockDevice::createDeviceImpl() {
 
 void MockDevice::setOSTime(OSTime *osTime) {
     this->osTime.reset(osTime);
-};
-
-void MockDevice::setDriverInfo(DriverInfo *driverInfo) {
-    this->driverInfo.reset(driverInfo);
-};
-
-bool MockDevice::hasDriverInfo() {
-    return driverInfo.get() != nullptr;
 };
 
 void MockDevice::injectMemoryManager(MemoryManager *memoryManager) {

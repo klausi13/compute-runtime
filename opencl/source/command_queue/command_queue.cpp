@@ -328,7 +328,7 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
         if (memObj->peekClMemObjType() == CL_MEM_OBJECT_BUFFER) {
             auto buffer = castToObject<Buffer>(memObj);
 
-            retVal = enqueueWriteBuffer(buffer, CL_TRUE, unmapInfo.offset[0], unmapInfo.size[0], mappedPtr, memObj->getMapAllocation(),
+            retVal = enqueueWriteBuffer(buffer, CL_FALSE, unmapInfo.offset[0], unmapInfo.size[0], mappedPtr, memObj->getMapAllocation(),
                                         eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList, eventsRequest.outEvent);
         } else {
             auto image = castToObjectOrAbort<Image>(memObj);
@@ -553,10 +553,6 @@ size_t CommandQueue::estimateTimestampPacketNodesCount(const MultiDispatchInfo &
 bool CommandQueue::bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandType, cl_bool blocking, size_t size, void *ptr,
                                         cl_uint numEventsInWaitList, const cl_event *eventWaitList) {
 
-    if (buffer->getMemoryManager() && buffer->getMemoryManager()->isCpuCopyRequired(ptr)) {
-        return true;
-    }
-
     auto debugVariableSet = false;
     // Requested by debug variable or allowed by Buffer
     if (CL_COMMAND_READ_BUFFER == commandType && DebugManager.flags.DoCpuCopyOnReadBuffer.get() != -1) {
@@ -580,6 +576,10 @@ bool CommandQueue::bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandT
     //check if buffer is compatible
     if (!buffer->isReadWriteOnCpuAllowed()) {
         return false;
+    }
+
+    if (buffer->getMemoryManager() && buffer->getMemoryManager()->isCpuCopyRequired(ptr)) {
+        return true;
     }
 
     if (debugVariableSet) {

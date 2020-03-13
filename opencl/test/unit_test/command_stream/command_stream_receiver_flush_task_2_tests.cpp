@@ -582,7 +582,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenTwoConsecu
 
     EXPECT_EQ(false, kernel.mockKernel->isBuiltIn);
 
-    auto deviceInfo = pDevice->getDeviceInfo();
+    auto deviceInfo = pClDevice->getDeviceInfo();
     if (deviceInfo.force32BitAddressess) {
         EXPECT_FALSE(commandStreamReceiver->getGSBAFor32BitProgrammed());
     }
@@ -696,7 +696,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenNDRangeKer
 
     EXPECT_EQ(false, kernel.mockKernel->isBuiltIn);
 
-    auto deviceInfo = pDevice->getDeviceInfo();
+    auto deviceInfo = pClDevice->getDeviceInfo();
     if (deviceInfo.force32BitAddressess) {
         EXPECT_FALSE(commandStreamReceiver->getGSBAFor32BitProgrammed());
     }
@@ -1063,7 +1063,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenSamplerCacheFlushSentT
     auto samplerCacheFlushBeforeSize = commandStreamReceiver.getRequiredCmdStreamSize(flags, *pDevice);
     EXPECT_EQ(samplerCacheNotFlushedSize, samplerCacheFlushBeforeSize);
 
-    NEO::WorkaroundTable *waTable = &pDevice->getExecutionEnvironment()->getMutableHardwareInfo()->workaroundTable;
+    NEO::WorkaroundTable *waTable = &pDevice->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable;
     waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
 
     samplerCacheFlushBeforeSize = commandStreamReceiver.getRequiredCmdStreamSize(flags, *pDevice);

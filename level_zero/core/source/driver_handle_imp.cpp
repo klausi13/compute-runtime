@@ -71,6 +71,7 @@ inline ze_memory_type_t parseUSMType(InternalMemoryType memoryType) {
 ze_result_t DriverHandleImp::getExtensionFunctionAddress(const char *pFuncName, void **pfunc) {
     *pfunc = this->osLibrary->getProcAddress(std::string(pFuncName));
     if (*pfunc == nullptr) {
+        DEBUG_BREAK_IF(true);
         return ZE_RESULT_ERROR_UNKNOWN;
     }
     return ZE_RESULT_SUCCESS;
@@ -288,6 +289,11 @@ ze_result_t DriverHandleImp::createEventPool(const ze_event_pool_desc_t *desc,
                                              ze_event_pool_handle_t *phEventPool) {
     auto device = Device::fromHandle(phDevices[0]);
     return device->createEventPool(desc, phEventPool);
+}
+
+ze_result_t DriverHandleImp::openEventPoolIpcHandle(ze_ipc_event_pool_handle_t hIpc,
+                                                    ze_event_pool_handle_t *phEventPool) {
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 
 } // namespace L0

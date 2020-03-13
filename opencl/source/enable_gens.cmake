@@ -22,7 +22,6 @@ set(RUNTIME_SRCS_GENX_CPP_BASE
   aub_mem_dump
   buffer
   command_queue
-  command_stream_receiver_hw
   command_stream_receiver_simulated_common_hw
   experimental_command_buffer
   gpgpu_walker
@@ -89,7 +88,7 @@ macro(macro_for_each_gen)
 
   apply_macro_for_each_platform()
 
-  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${NEO_CORE_DIRECTORY}/${GEN_TYPE_LOWER}/image_core_${GEN_TYPE_LOWER}.cpp)
+  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${NEO_SHARED_DIRECTORY}/${GEN_TYPE_LOWER}/image_core_${GEN_TYPE_LOWER}.cpp)
 
   list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_WINDOWS ${GENX_PREFIX}/windows/hw_info_config_${GEN_TYPE_LOWER}.cpp)
   list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_LINUX ${GENX_PREFIX}/linux/hw_info_config_${GEN_TYPE_LOWER}.cpp)

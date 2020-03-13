@@ -1582,15 +1582,15 @@ TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptions) {
 }
 
 TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsForced20) {
-    auto defaultVersion = pDevice->deviceInfo.clVersion;
+    auto defaultVersion = pClDevice->deviceInfo.clVersion;
 
-    pDevice->deviceInfo.clVersion = "OpenCL 2.0";
+    pClDevice->deviceInfo.clVersion = "OpenCL 2.0";
     MockProgram program(*pDevice->getExecutionEnvironment(), pContext, false, pDevice);
     char paramValue[32];
     pClDevice->getDeviceInfo(CL_DEVICE_VERSION, 32, paramValue, 0);
     EXPECT_STREQ("OpenCL 2.0", paramValue);
     EXPECT_TRUE(CompilerOptions::contains(program.getInternalOptions(), "-ocl-version=200"));
-    pDevice->deviceInfo.clVersion = defaultVersion;
+    pClDevice->deviceInfo.clVersion = defaultVersion;
 }
 
 TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsWhenStatelessToStatefulIsDisabled) {
@@ -1652,7 +1652,8 @@ TEST_F(ProgramTests, WhenCreatingProgramThenBindlessIsEnabledOnlyIfDebugFlagIsEn
 }
 
 TEST_F(ProgramTests, givenDeviceThatSupportsSharedSystemMemoryAllocationWhenProgramIsCompiledThenItForcesStatelessCompilation) {
-    pDevice->deviceInfo.sharedSystemMemCapabilities = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
+    pClDevice->deviceInfo.sharedSystemMemCapabilities = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
+    pClDevice->device.deviceInfo.sharedSystemAllocationsSupport = true;
     MockProgram program(*pDevice->getExecutionEnvironment(), pContext, false, pDevice);
     EXPECT_TRUE(CompilerOptions::contains(program.getInternalOptions().c_str(), CompilerOptions::greaterThan4gbBuffersRequired)) << program.getInternalOptions();
 }
@@ -1914,6 +1915,7 @@ TEST_F(ProgramTests, RebuildBinaryButNoCompilerInterface) {
     auto pDevice = pContext->getDevice(0);
     auto executionEnvironment = pDevice->getExecutionEnvironment();
     std::unique_ptr<RootDeviceEnvironment> rootDeviceEnvironment = std::make_unique<NoCompilerInterfaceRootDeviceEnvironment>(*executionEnvironment);
+    rootDeviceEnvironment->setHwInfo(&pDevice->getHardwareInfo());
     std::swap(rootDeviceEnvironment, executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     auto program = std::make_unique<MockProgram>(*executionEnvironment);
     EXPECT_NE(nullptr, program);
@@ -2752,6 +2754,7 @@ TEST_F(setProgramSpecializationConstantTests, givenInvalidGetSpecConstantsInfoRe
 TEST(setProgramSpecializationConstantTest, givenUninitializedCompilerinterfaceWhenSetProgramSpecializationConstantThenErrorIsReturned) {
     auto executionEnvironment = new MockExecutionEnvironment();
     executionEnvironment->rootDeviceEnvironments[0] = std::make_unique<NoCompilerInterfaceRootDeviceEnvironment>(*executionEnvironment);
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(*platformDevices);
     MockDevice mockDevice(executionEnvironment, 0);
     SpecializationConstantProgramMock mockProgram(*executionEnvironment);
     mockProgram.setDevice(&mockDevice);

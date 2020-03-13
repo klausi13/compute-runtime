@@ -106,14 +106,47 @@ TEST_F(DeviceTest, WhenRetainingThenReferenceIsOneAndApiIsUsed) {
     ASSERT_EQ(1, pClDevice->getReference());
 }
 
-TEST_F(DeviceTest, WhenAppendingOsExtensionsThenDeviceInfoIsProperlyUpdated) {
-    EXPECT_NE(nullptr, pDevice);
-    std::string testedValue = "1234!@#$";
-    std::string expectedExtensions = pDevice->deviceExtensions + testedValue;
+TEST_F(DeviceTest, WhenCreatingClDeviceThenDeviceInfoIsCopiedFromDevice) {
+    auto &deviceInfo = pDevice->getDeviceInfo();
+    auto &clDeviceInfo = pClDevice->getDeviceInfo();
 
-    pDevice->appendOSExtensions(testedValue);
-    EXPECT_EQ(expectedExtensions, pDevice->deviceExtensions);
-    EXPECT_STREQ(expectedExtensions.c_str(), pDevice->deviceInfo.deviceExtensions);
+    EXPECT_EQ(deviceInfo.maxSubGroups, clDeviceInfo.maxSubGroups);
+    EXPECT_EQ(deviceInfo.debuggerActive, clDeviceInfo.debuggerActive);
+    EXPECT_EQ(deviceInfo.errorCorrectionSupport, clDeviceInfo.errorCorrectionSupport);
+    EXPECT_EQ(deviceInfo.force32BitAddressess, clDeviceInfo.force32BitAddressess);
+    EXPECT_EQ(deviceInfo.imageSupport, clDeviceInfo.imageSupport);
+    EXPECT_EQ(deviceInfo.vmeAvcSupportsPreemption, clDeviceInfo.vmeAvcSupportsPreemption);
+    EXPECT_EQ(deviceInfo.ilVersion, clDeviceInfo.ilVersion);
+    EXPECT_EQ(deviceInfo.profilingTimerResolution, clDeviceInfo.profilingTimerResolution);
+    EXPECT_EQ(deviceInfo.addressBits, clDeviceInfo.addressBits);
+    EXPECT_EQ(deviceInfo.computeUnitsUsedForScratch, clDeviceInfo.computeUnitsUsedForScratch);
+    EXPECT_EQ(deviceInfo.globalMemCachelineSize, clDeviceInfo.globalMemCachelineSize);
+    EXPECT_EQ(deviceInfo.maxClockFrequency, clDeviceInfo.maxClockFrequency);
+    EXPECT_EQ(deviceInfo.maxFrontEndThreads, clDeviceInfo.maxFrontEndThreads);
+    EXPECT_EQ(deviceInfo.maxOnDeviceQueues, clDeviceInfo.maxOnDeviceQueues);
+    EXPECT_EQ(deviceInfo.maxReadImageArgs, clDeviceInfo.maxReadImageArgs);
+    EXPECT_EQ(deviceInfo.maxSamplers, clDeviceInfo.maxSamplers);
+    EXPECT_EQ(deviceInfo.maxWriteImageArgs, clDeviceInfo.maxWriteImageArgs);
+    EXPECT_EQ(deviceInfo.numThreadsPerEU, clDeviceInfo.numThreadsPerEU);
+    EXPECT_EQ(deviceInfo.vendorId, clDeviceInfo.vendorId);
+    EXPECT_EQ(deviceInfo.globalMemSize, clDeviceInfo.globalMemSize);
+    EXPECT_EQ(deviceInfo.image2DMaxHeight, clDeviceInfo.image2DMaxHeight);
+    EXPECT_EQ(deviceInfo.image2DMaxWidth, clDeviceInfo.image2DMaxWidth);
+    EXPECT_EQ(deviceInfo.image3DMaxDepth, clDeviceInfo.image3DMaxDepth);
+    EXPECT_EQ(deviceInfo.imageMaxArraySize, clDeviceInfo.imageMaxArraySize);
+    EXPECT_EQ(deviceInfo.imageMaxBufferSize, clDeviceInfo.imageMaxBufferSize);
+    EXPECT_EQ(deviceInfo.localMemSize, clDeviceInfo.localMemSize);
+    EXPECT_EQ(deviceInfo.maxMemAllocSize, clDeviceInfo.maxMemAllocSize);
+    EXPECT_EQ(deviceInfo.maxNumEUsPerSubSlice, clDeviceInfo.maxNumEUsPerSubSlice);
+    EXPECT_EQ(deviceInfo.maxParameterSize, clDeviceInfo.maxParameterSize);
+    EXPECT_EQ(deviceInfo.maxWorkGroupSize, clDeviceInfo.maxWorkGroupSize);
+    EXPECT_EQ(deviceInfo.maxWorkItemSizes[0], clDeviceInfo.maxWorkItemSizes[0]);
+    EXPECT_EQ(deviceInfo.maxWorkItemSizes[1], clDeviceInfo.maxWorkItemSizes[1]);
+    EXPECT_EQ(deviceInfo.maxWorkItemSizes[2], clDeviceInfo.maxWorkItemSizes[2]);
+    EXPECT_EQ(deviceInfo.outProfilingTimerResolution, clDeviceInfo.outProfilingTimerResolution);
+    EXPECT_EQ(deviceInfo.printfBufferSize, clDeviceInfo.printfBufferSize);
+
+    EXPECT_EQ(deviceInfo.sharedSystemAllocationsSupport, (clDeviceInfo.sharedSystemMemCapabilities != 0));
 }
 
 HWTEST_F(DeviceTest, WhenDeviceIsCreatedThenActualEngineTypeIsSameAsDefault) {
@@ -201,6 +234,9 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachOsContextHasU
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     const size_t numDevices = 2;
     executionEnvironment->prepareRootDeviceEnvironments(numDevices);
+    for (auto i = 0u; i < numDevices; i++) {
+        executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(*platformDevices);
+    }
     auto hwInfo = *platformDevices[0];
     const auto &numGpgpuEngines = static_cast<uint32_t>(HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo).size());
 
@@ -228,6 +264,9 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachDeviceHasSepe
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     const size_t numDevices = 2;
     executionEnvironment->prepareRootDeviceEnvironments(numDevices);
+    for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
+        executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(*platformDevices);
+    }
     auto device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
     auto device2 = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 1u));
 
@@ -239,6 +278,9 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachDeviceHasSepe
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     const size_t numDevices = 2;
     executionEnvironment->prepareRootDeviceEnvironments(numDevices);
+    for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
+        executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(*platformDevices);
+    }
     auto hwInfo = *platformDevices[0];
     const auto &numGpgpuEngines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo).size();
     auto device1 = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
@@ -254,8 +296,9 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachDeviceHasSepe
 
 HWTEST_F(DeviceTest, givenDeviceWhenAskingForDefaultEngineThenReturnValidValue) {
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
+    executionEnvironment->prepareRootDeviceEnvironments(1u);
     auto &hwHelper = HwHelperHw<FamilyType>::get();
-    hwHelper.adjustDefaultEngineType(executionEnvironment->getMutableHardwareInfo());
+    hwHelper.adjustDefaultEngineType(executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo());
 
     auto device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0));
     auto osContext = device->getDefaultEngine().osContext;
@@ -290,21 +333,24 @@ HWTEST_F(DeviceHwTest, givenHwHelperInputWhenInitializingCsrThenCreatePageTableM
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(3);
     executionEnvironment.incRefInternal();
+    for (auto i = 0u; i < executionEnvironment.rootDeviceEnvironments.size(); i++) {
+        executionEnvironment.rootDeviceEnvironments[i]->setHwInfo(&localHwInfo);
+    }
     executionEnvironment.initializeMemoryManager();
-    executionEnvironment.setHwInfo(&localHwInfo);
     auto defaultEngineType = getChosenEngineType(localHwInfo);
     std::unique_ptr<MockDevice> device;
     device.reset(MockDevice::createWithExecutionEnvironment<MockDevice>(&localHwInfo, &executionEnvironment, 0));
     auto &csr0 = device->getUltCommandStreamReceiver<FamilyType>();
     EXPECT_FALSE(csr0.createPageTableManagerCalled);
 
-    auto hwInfo = executionEnvironment.getMutableHardwareInfo();
+    auto hwInfo = executionEnvironment.rootDeviceEnvironments[1]->getMutableHardwareInfo();
     hwInfo->capabilityTable.ftrRenderCompressedBuffers = true;
     hwInfo->capabilityTable.ftrRenderCompressedImages = false;
     device.reset(MockDevice::createWithExecutionEnvironment<MockDevice>(&localHwInfo, &executionEnvironment, 1));
     auto &csr1 = device->getUltCommandStreamReceiver<FamilyType>();
     EXPECT_EQ(csr1.needsPageTableManager(defaultEngineType), csr1.createPageTableManagerCalled);
 
+    hwInfo = executionEnvironment.rootDeviceEnvironments[2]->getMutableHardwareInfo();
     hwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
     hwInfo->capabilityTable.ftrRenderCompressedImages = true;
     device.reset(MockDevice::createWithExecutionEnvironment<MockDevice>(&localHwInfo, &executionEnvironment, 2));
